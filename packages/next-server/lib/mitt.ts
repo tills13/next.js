@@ -16,12 +16,18 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 
 type Handler = (...evts: any[]) => void
 
-export default function mitt() {
+export type MittEmitter = {
+  on(type: string, handler: Handler): void
+  off(type: string, handler: Handler): void
+  emit(type: string, ...evts: any[]): void
+}
+
+export default function mitt(): MittEmitter {
   const all: { [s: string]: Handler[] } = Object.create(null)
 
   return {
     on(type: string, handler: Handler) {
-      (all[type] || (all[type] = [])).push(handler)
+      ;(all[type] || (all[type] = [])).push(handler)
     },
 
     off(type: string, handler: Handler) {
@@ -32,7 +38,9 @@ export default function mitt() {
     },
 
     emit(type: string, ...evts: any[]) {
-      (all[type] || []).slice().map((handler: Handler) => { handler(...evts) })
+      ;(all[type] || []).slice().map((handler: Handler) => {
+        handler(...evts)
+      })
     },
   }
 }

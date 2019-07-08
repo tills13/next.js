@@ -6,7 +6,7 @@ import path from 'path'
 import getPort from 'get-port'
 import spawn from 'cross-spawn'
 import { readFileSync, writeFileSync, existsSync, unlinkSync } from 'fs'
-import fkill from 'fkill'
+import treeKill from 'tree-kill'
 
 // `next` here is the symlink in `test/node_modules/next` which points to the root directory.
 // This is done so that requiring from `next` works.
@@ -17,7 +17,12 @@ import _pkg from 'next/package.json'
 export const nextServer = server
 export const pkg = _pkg
 
-export function initNextServerScript (scriptPath, successRegexp, env) {
+export function initNextServerScript (
+  scriptPath,
+  successRegexp,
+  env,
+  failRegexp
+) {
   return new Promise((resolve, reject) => {
     const instance = spawn('node', [scriptPath], { env })
 
@@ -30,7 +35,12 @@ export function initNextServerScript (scriptPath, successRegexp, env) {
     }
 
     function handleStderr (data) {
-      process.stderr.write(data.toString())
+      const message = data.toString()
+      if (failRegexp && failRegexp.test(message)) {
+        instance.kill()
+        return reject(new Error('received failRegexp'))
+      }
+      process.stderr.write(message)
     }
 
     instance.stdout.on('data', handleStdout)
@@ -41,7 +51,7 @@ export function initNextServerScript (scriptPath, successRegexp, env) {
       instance.stderr.removeListener('data', handleStderr)
     })
 
-    instance.on('error', (err) => {
+    instance.on('error', err => {
       reject(err)
     })
   })
@@ -53,11 +63,13 @@ export function renderViaAPI (app, pathname, query) {
 }
 
 export function renderViaHTTP (appPort, pathname, query) {
-  return fetchViaHTTP(appPort, pathname, query).then((res) => res.text())
+  return fetchViaHTTP(appPort, pathname, query).then(res => res.text())
 }
 
 export function fetchViaHTTP (appPort, pathname, query, opts) {
-  const url = `http://localhost:${appPort}${pathname}${query ? `?${qs.stringify(query)}` : ''}`
+  const url = `http://localhost:${appPort}${pathname}${
+    query ? `?${qs.stringify(query)}` : ''
+  }`
   return fetch(url, opts)
 }
 
@@ -66,10 +78,24 @@ export function findPort () {
 }
 
 export function runNextCommand (argv, options = {}) {
-  const cwd = path.dirname(require.resolve('next/package'))
+  const nextDir = path.dirname(require.resolve('next/package'))
+  const nextBin = path.join(nextDir, 'dist/bin/next')
+  const cwd = options.cwd || nextDir
+  // Let Next.js decide the environment
+  const env = { ...process.env, ...options.env, NODE_ENV: '' }
+
   return new Promise((resolve, reject) => {
     console.log(`Running command "next ${argv.join(' ')}"`)
-    const instance = spawn('node', ['dist/bin/next', ...argv], { ...options.spawnOptions, cwd, stdio: ['ignore', 'pipe', 'pipe'] })
+    const instance = spawn('node', [nextBin, ...argv], {
+      ...options.spawnOptions,
+      cwd,
+      env,
+      stdio: ['ignore', 'pipe', 'pipe']
+    })
+
+    if (typeof options.instance === 'function') {
+      options.instance(instance)
+    }
 
     let stderrOutput = ''
     if (options.stderr) {
@@ -92,7 +118,7 @@ export function runNextCommand (argv, options = {}) {
       })
     })
 
-    instance.on('error', (err) => {
+    instance.on('error', err => {
       err.stdout = stdoutOutput
       err.stderr = stderrOutput
       reject(err)
@@ -100,14 +126,16 @@ export function runNextCommand (argv, options = {}) {
   })
 }
 
-export function runNextCommandDev (argv, stdOut) {
+export function runNextCommandDev (argv, stdOut, opts = {}) {
   const cwd = path.dirname(require.resolve('next/package'))
+  const env = { ...process.env, NODE_ENV: undefined, ...opts.env }
+
   return new Promise((resolve, reject) => {
-    const instance = spawn('node', ['dist/bin/next', ...argv], { cwd })
+    const instance = spawn('node', ['dist/bin/next', ...argv], { cwd, env })
 
     function handleStdout (data) {
       const message = data.toString()
-      if (/> Ready on/.test(message)) {
+      if (/ready on/i.test(message)) {
         resolve(stdOut ? message : instance)
       }
       process.stdout.write(message)
@@ -125,7 +153,7 @@ export function runNextCommandDev (argv, stdOut) {
       instance.stderr.removeListener('data', handleStderr)
     })
 
-    instance.on('error', (err) => {
+    instance.on('error', err => {
       reject(err)
     })
   })
@@ -136,17 +164,52 @@ export function launchApp (dir, port) {
   return runNextCommandDev([dir, '-p', port])
 }
 
-export function nextBuild (dir, args = []) {
-  return runNextCommand(['build', dir, ...args])
+export function nextBuild (dir, args = [], opts = {}) {
+  return runNextCommand(['build', dir, ...args], opts)
 }
 
 export function nextExport (dir, { outdir }) {
   return runNextCommand(['export', dir, '--outdir', outdir])
 }
 
+export function nextStart (dir, port, opts = {}) {
+  return runNextCommandDev(['start', '-p', port, dir], undefined, opts)
+}
+
+export function buildTS (args = [], cwd, env = {}) {
+  cwd = cwd || path.dirname(require.resolve('next/package'))
+  env = { ...process.env, NODE_ENV: undefined, ...env }
+
+  return new Promise((resolve, reject) => {
+    const instance = spawn(
+      'node',
+      [require.resolve('typescript/lib/tsc'), ...args],
+      { cwd, env }
+    )
+    let output = ''
+
+    const handleData = chunk => {
+      output += chunk.toString()
+    }
+
+    instance.stdout.on('data', handleData)
+    instance.stderr.on('data', handleData)
+
+    instance.on('exit', code => {
+      if (code) { return reject(new Error('exited with code: ' + code + '\n' + output)) }
+      resolve()
+    })
+  })
+}
+
 // Kill a launched app
 export async function killApp (instance) {
-  await fkill(instance.pid)
+  await new Promise((resolve, reject) => {
+    treeKill(instance.pid, err => {
+      if (err) return reject(err)
+      resolve()
+    })
+  })
 }
 
 export async function startApp (app) {
@@ -181,7 +244,7 @@ function promiseCall (obj, method, ...args) {
 }
 
 export function waitFor (millis) {
-  return new Promise((resolve) => setTimeout(resolve, millis))
+  return new Promise(resolve => setTimeout(resolve, millis))
 }
 
 export async function startStaticServer (dir) {
@@ -224,7 +287,9 @@ export async function check (contentFn, regex) {
 export class File {
   constructor (path) {
     this.path = path
-    this.originalContent = existsSync(this.path) ? readFileSync(this.path, 'utf8') : null
+    this.originalContent = existsSync(this.path)
+      ? readFileSync(this.path, 'utf8')
+      : null
   }
 
   write (content) {
@@ -268,12 +333,16 @@ export async function getReactErrorOverlayContent (browser) {
       }
 
       found = true
-      return browser.eval(`document.querySelector('iframe').contentWindow.document.body.innerHTML`)
+      return browser.eval(
+        `document.querySelector('iframe').contentWindow.document.body.innerHTML`
+      )
     } catch (ex) {
       await waitFor(1000)
     }
   }
-  return browser.eval(`document.querySelector('iframe').contentWindow.document.body.innerHTML`)
+  return browser.eval(
+    `document.querySelector('iframe').contentWindow.document.body.innerHTML`
+  )
 }
 
 export function getBrowserBodyText (browser) {

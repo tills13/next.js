@@ -4,16 +4,6 @@ import Layout from '../components/layout'
 import { login } from '../utils/auth'
 
 class Login extends Component {
-  static getInitialProps ({ req }) {
-    const protocol = process.env.NODE_ENV === 'production' ? 'https' : 'http'
-
-    const apiUrl = process.browser
-      ? `${protocol}://${window.location.host}/api/login.js`
-      : `${protocol}://${req.headers.host}/api/login.js`
-
-    return { apiUrl }
-  }
-
   constructor (props) {
     super(props)
 
@@ -28,8 +18,9 @@ class Login extends Component {
 
   async handleSubmit (event) {
     event.preventDefault()
+    this.setState({ error: '' })
     const username = this.state.username
-    const url = this.props.apiUrl
+    const url = `${process.env.API_URL}/api/login.js`
 
     try {
       const response = await fetch(url, {
@@ -45,14 +36,14 @@ class Login extends Component {
         // https://github.com/developit/unfetch#caveats
         let error = new Error(response.statusText)
         error.response = response
-        return Promise.reject(error)
+        throw error
       }
     } catch (error) {
       console.error(
         'You have an error in your code or there are Network issues.',
         error
       )
-      throw new Error(error)
+      this.setState({ error: error.message })
     }
   }
 

@@ -1,10 +1,6 @@
 /* eslint-env jest */
 /* global jasmine */
-import {
-  runNextCommand,
-  runNextCommandDev,
-  findPort
-} from 'next-test-utils'
+import { runNextCommand, runNextCommandDev, findPort } from 'next-test-utils'
 import { join } from 'path'
 import pkg from 'next/package'
 jasmine.DEFAULT_TIMEOUT_INTERVAL = 1000 * 60 * 5
@@ -31,21 +27,18 @@ describe('CLI Usage', () => {
       const output = await runNextCommand(['--version'], {
         stdout: true
       })
-      expect(output.stdout).toMatch(new RegExp(`Next\\.js v${pkg.version.replace(/\./g, '\\.')}`))
+      expect(output.stdout).toMatch(
+        new RegExp(`Next\\.js v${pkg.version.replace(/\./g, '\\.')}`)
+      )
     })
 
     test('-v', async () => {
       const output = await runNextCommand(['--version'], {
         stdout: true
       })
-      expect(output.stdout).toMatch(new RegExp(`Next\\.js v${pkg.version.replace(/\./g, '\\.')}`))
-    })
-
-    test('--inspect', async () => {
-      const output = await runNextCommand(['build', dir, '--inspect'], {
-        stdout: true
-      })
-      expect(output.stdout).toMatch(/Passing "--inspect" to Node\.js/)
+      expect(output.stdout).toMatch(
+        new RegExp(`Next\\.js v${pkg.version.replace(/\./g, '\\.')}`)
+      )
     })
   })
   describe('build', () => {
@@ -53,14 +46,18 @@ describe('CLI Usage', () => {
       const help = await runNextCommand(['build', '--help'], {
         stdout: true
       })
-      expect(help.stdout).toMatch(/Compiles the application for production deployment/)
+      expect(help.stdout).toMatch(
+        /Compiles the application for production deployment/
+      )
     })
 
     test('-h', async () => {
       const help = await runNextCommand(['build', '-h'], {
         stdout: true
       })
-      expect(help.stdout).toMatch(/Compiles the application for production deployment/)
+      expect(help.stdout).toMatch(
+        /Compiles the application for production deployment/
+      )
     })
   })
 
@@ -82,7 +79,7 @@ describe('CLI Usage', () => {
     test('custom directory', async () => {
       const port = await findPort()
       const output = await runNextCommandDev([dir, '--port', port], true)
-      expect(output).toMatch(/Ready on/)
+      expect(output).toMatch(/ready on/i)
     })
 
     test('--port', async () => {
@@ -99,13 +96,19 @@ describe('CLI Usage', () => {
 
     test('--hostname', async () => {
       const port = await findPort()
-      const output = await runNextCommandDev([dir, '--hostname', '0.0.0.0', '--port', port], true)
+      const output = await runNextCommandDev(
+        [dir, '--hostname', '0.0.0.0', '--port', port],
+        true
+      )
       expect(output).toMatch(new RegExp(`http://0.0.0.0:${port}`))
     })
 
     test('-H', async () => {
       const port = await findPort()
-      const output = await runNextCommandDev([dir, '-H', '0.0.0.0', '--port', port], true)
+      const output = await runNextCommandDev(
+        [dir, '-H', '0.0.0.0', '--port', port],
+        true
+      )
       expect(output).toMatch(new RegExp(`http://0.0.0.0:${port}`))
     })
   })

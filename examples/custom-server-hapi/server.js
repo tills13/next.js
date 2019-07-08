@@ -1,5 +1,5 @@
 const next = require('next')
-const Hapi = require('hapi')
+const Hapi = require('@hapi/hapi')
 const {
   pathWrapper,
   defaultHandlerWrapper,
@@ -29,6 +29,12 @@ app.prepare().then(async () => {
   server.route({
     method: 'GET',
     path: '/_next/{p*}' /* next specific routes */,
+    handler: nextHandlerWrapper(app)
+  })
+
+  server.route({
+    method: 'GET',
+    path: '/static/{p*}' /* use next to handle static files */,
     handler: nextHandlerWrapper(app)
   })
 

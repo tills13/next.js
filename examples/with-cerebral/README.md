@@ -1,5 +1,3 @@
-[![Deploy to now](https://deploy.now.sh/static/button.svg)](https://deploy.now.sh/?repo=https://github.com/zeit/next.js/tree/master/examples/with-cerebral)
-
 # Declarative State & Side-effect management with [CerebralJS](https://cerebraljs.com/)
 
 ## How to use
@@ -46,7 +44,7 @@ Use [CerebralJS](https://cerebraljs.com/) to manage an apps state and side effec
 Declarative CerebralJS:
 
 ```js
-[
+;[
   setLoading(true),
   getUser,
   {
@@ -54,23 +52,23 @@ Declarative CerebralJS:
     error: setError,
   },
   setLoading(false),
-];
+]
 ```
 
 vs imperative JS:
 
 ```js
 function getUser() {
-  this.isLoading = true;
+  this.isLoading = true
   ajax
-    .get("/user")
+    .get('/user')
     .then(user => {
-      this.data = user;
-      this.isLoading = false;
+      this.data = user
+      this.isLoading = false
     })
     .catch(error => {
-      this.error = error;
-      this.isLoading = false;
-    });
+      this.error = error
+      this.isLoading = false
+    })
 }
 ```

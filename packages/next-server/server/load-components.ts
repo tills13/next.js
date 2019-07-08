@@ -1,21 +1,80 @@
-import {join} from 'path'
-import {CLIENT_STATIC_FILES_PATH, BUILD_MANIFEST, REACT_LOADABLE_MANIFEST, SERVER_DIRECTORY} from 'next-server/constants'
-import {requirePage} from './require'
+import {
+  BUILD_MANIFEST,
+  CLIENT_STATIC_FILES_PATH,
+  REACT_LOADABLE_MANIFEST,
+  SERVER_DIRECTORY,
+} from '../lib/constants'
+import { join } from 'path'
+import { PageConfig } from 'next-server/types'
+import { requirePage } from './require'
 
-function interopDefault(mod: any) {
+export function interopDefault(mod: any) {
   return mod.default || mod
 }
 
-export async function loadComponents(distDir: string, buildId: string, pathname: string) {
-  const documentPath = join(distDir, SERVER_DIRECTORY, CLIENT_STATIC_FILES_PATH, buildId, 'pages', '_document')
-  const appPath = join(distDir, SERVER_DIRECTORY, CLIENT_STATIC_FILES_PATH, buildId, 'pages', '_app')
-  const [buildManifest, reactLoadableManifest, Component, Document, App] = await Promise.all([
+export type LoadComponentsReturnType = {
+  Component: any
+  pageConfig: PageConfig
+  buildManifest?: any
+  reactLoadableManifest?: any
+  Document?: any
+  DocumentMiddleware?: any
+  App?: any
+}
+
+export async function loadComponents(
+  distDir: string,
+  buildId: string,
+  pathname: string,
+  serverless: boolean
+): Promise<LoadComponentsReturnType> {
+  if (serverless) {
+    const Component = await requirePage(pathname, distDir, serverless)
+    return { Component, pageConfig: Component.config || {} }
+  }
+  const documentPath = join(
+    distDir,
+    SERVER_DIRECTORY,
+    CLIENT_STATIC_FILES_PATH,
+    buildId,
+    'pages',
+    '_document'
+  )
+  const appPath = join(
+    distDir,
+    SERVER_DIRECTORY,
+    CLIENT_STATIC_FILES_PATH,
+    buildId,
+    'pages',
+    '_app'
+  )
+
+  const DocumentMod = require(documentPath)
+  const { middleware: DocumentMiddleware } = DocumentMod
+
+  const ComponentMod = requirePage(pathname, distDir, serverless)
+
+  const [
+    buildManifest,
+    reactLoadableManifest,
+    Component,
+    Document,
+    App,
+  ] = await Promise.all([
     require(join(distDir, BUILD_MANIFEST)),
     require(join(distDir, REACT_LOADABLE_MANIFEST)),
-    interopDefault(requirePage(pathname, distDir)),
-    interopDefault(require(documentPath)),
+    interopDefault(ComponentMod),
+    interopDefault(DocumentMod),
     interopDefault(require(appPath)),
   ])
 
-  return {buildManifest, reactLoadableManifest, Component, Document, App}
+  return {
+    App,
+    Document,
+    Component,
+    buildManifest,
+    DocumentMiddleware,
+    reactLoadableManifest,
+    pageConfig: ComponentMod.config || {},
+  }
 }

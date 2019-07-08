@@ -1,6 +1,9 @@
 import initNext, * as next from './'
-import initOnDemandEntries from './on-demand-entries-client'
-import initWebpackHMR from './webpack-hot-middleware-client'
+import EventSourcePolyfill from './dev/event-source-polyfill'
+import initOnDemandEntries from './dev/on-demand-entries-client'
+import initWebpackHMR from './dev/webpack-hot-middleware-client'
+import initializeBuildWatcher from './dev/dev-build-watcher'
+import initializePrerenderIndicator from './dev/prerender-indicator'
 
 // Temporary workaround for the issue described here:
 // https://github.com/zeit/next.js/issues/3775#issuecomment-407438123
@@ -8,10 +11,13 @@ import initWebpackHMR from './webpack-hot-middleware-client'
 // The runtimeChunk can't hot reload itself currently to correct it when adding pages using on-demand-entries
 // REPLACE_NOOP_IMPORT
 
+// Support EventSource on Internet Explorer 11
+if (!window.EventSource) {
+  window.EventSource = EventSourcePolyfill
+}
+
 const {
-  __NEXT_DATA__: {
-    assetPrefix
-  }
+  __NEXT_DATA__: { assetPrefix }
 } = window
 
 const prefix = assetPrefix || ''
@@ -19,8 +25,10 @@ const webpackHMR = initWebpackHMR({ assetPrefix: prefix })
 
 window.next = next
 initNext({ webpackHMR })
-  .then((emitter) => {
+  .then(emitter => {
     initOnDemandEntries({ assetPrefix: prefix })
+    initializeBuildWatcher()
+    initializePrerenderIndicator()
 
     let lastScroll
 
@@ -43,6 +51,7 @@ initNext({ webpackHMR })
         lastScroll = null
       }
     })
-  }).catch((err) => {
+  })
+  .catch(err => {
     console.error('Error was not caught', err)
   })

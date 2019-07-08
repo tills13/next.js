@@ -1,5 +1,3 @@
-[![Deploy to now](https://deploy.now.sh/static/button.svg)](https://deploy.now.sh/?repo=https://github.com/zeit/next.js/tree/master/examples/with-context-api)
-
 # Hello World example
 
 ## How to use
@@ -39,15 +37,14 @@ Deploy it to the cloud with [now](https://zeit.co/now) ([download](https://zeit.
 now
 ```
 
-## The idea behind the example*
+## The idea behind the example\*
 
-This example shows how to use react context api in our app. 
+This example shows how to use react context api in our app.
 
-It provides an example of using `pages/_app.js` to include include the context api provider and then shows how both the `pages/index.js` and `pages/about.js` can both share the same data using the context api consumer.
+It provides an example of using `pages/_app.js` to include the context api provider and then shows how both the `pages/index.js` and `pages/about.js` can both share the same data using the context api consumer.
 
 The `pages/index.js` shows how to, from the home page, increment and decrement the context data by 1 (a hard code value in the context provider itself).
 
 The `pages/about.js` shows how to, from the about page, how to pass an increment value from the about page into the context provider itself.
 
-
-**Based on WesBos example*.
+\*_Based on WesBos example_.

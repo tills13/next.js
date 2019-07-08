@@ -15,13 +15,13 @@ class MyMobxApp extends App {
 
     return {
       ...appProps,
-      initialMobxState: mobxStore
+      initialMobxState: mobxStore,
     }
   }
 
   constructor(props) {
     super(props)
-    const isServer = !process.browser;
+    const isServer = typeof window === 'undefined'
     this.mobxStore = isServer
       ? props.initialMobxState
       : initializeStore(props.initialMobxState)

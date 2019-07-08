@@ -1,24 +1,28 @@
 /* eslint-env jest */
-/* global jasmine */
-import { readFileSync } from 'fs'
+/* global jasmine, browserName */
+import webdriver from 'next-webdriver'
+import { readFileSync, existsSync } from 'fs'
 import { join } from 'path'
 import {
-  pkg,
   nextServer,
-  nextBuild,
+  runNextCommand,
   startApp,
   stopApp,
   renderViaHTTP,
   waitFor
 } from 'next-test-utils'
-import webdriver from 'next-webdriver'
 import fetch from 'node-fetch'
 import dynamicImportTests from './dynamic'
 import processEnv from './process-env'
 import security from './security'
-import { BUILD_MANIFEST, REACT_LOADABLE_MANIFEST, PAGES_MANIFEST } from 'next-server/constants'
+import {
+  BUILD_MANIFEST,
+  REACT_LOADABLE_MANIFEST,
+  PAGES_MANIFEST
+} from 'next-server/constants'
 import cheerio from 'cheerio'
 const appDir = join(__dirname, '../')
+let serverDir
 let appPort
 let server
 let app
@@ -28,7 +32,8 @@ const context = {}
 
 describe('Production Usage', () => {
   beforeAll(async () => {
-    await nextBuild(appDir)
+    await runNextCommand(['build', appDir])
+
     app = nextServer({
       dir: join(__dirname, '../'),
       dev: false,
@@ -37,6 +42,9 @@ describe('Production Usage', () => {
 
     server = await startApp(app)
     context.appPort = appPort = server.address().port
+
+    const buildId = readFileSync(join(appDir, '.next/BUILD_ID'), 'utf8')
+    serverDir = join(appDir, '.next/server/static/', buildId, 'pages')
   })
   afterAll(() => stopApp(server))
 
@@ -55,6 +63,13 @@ describe('Production Usage', () => {
       expect(res2.status).toBe(304)
     })
 
+    it('should have X-Powered-By header support', async () => {
+      const url = `http://localhost:${appPort}/`
+      const header = (await fetch(url)).headers.get('X-Powered-By')
+
+      expect(header).toBe('Next.js')
+    })
+
     it('should render 404 for routes that do not exist', async () => {
       const url = `http://localhost:${appPort}/abcdefghijklmno`
       const res = await fetch(url)
@@ -65,10 +80,33 @@ describe('Production Usage', () => {
       expect(res.status).toBe(404)
     })
 
+    it('should render 405 for POST on page', async () => {
+      const res = await fetch(`http://localhost:${appPort}/about`, {
+        method: 'POST'
+      })
+      expect(res.status).toBe(405)
+    })
+
+    it('should render 404 for POST on missing page', async () => {
+      const res = await fetch(`http://localhost:${appPort}/fake-page`, {
+        method: 'POST'
+      })
+      expect(res.status).toBe(404)
+    })
+
     it('should render 404 for _next routes that do not exist', async () => {
       const url = `http://localhost:${appPort}/_next/abcdef`
       const res = await fetch(url)
       expect(res.status).toBe(404)
+    })
+
+    it('should render 404 even if the HTTP method is not GET or HEAD', async () => {
+      const url = `http://localhost:${appPort}/_next/abcdef`
+      const methods = ['POST', 'PUT', 'DELETE']
+      for (const method of methods) {
+        const res = await fetch(url, { method })
+        expect(res.status).toBe(404)
+      }
     })
 
     it('should render 404 for dotfiles in /static', async () => {
@@ -77,13 +115,15 @@ describe('Production Usage', () => {
       expect(res.status).toBe(404)
     })
 
-    it('should render 501 if the HTTP method is not GET or HEAD', async () => {
-      const url = `http://localhost:${appPort}/_next/abcdef`
-      const methods = ['POST', 'PUT', 'DELETE']
-      for (const method of methods) {
-        const res = await fetch(url, { method })
-        expect(res.status).toBe(501)
-      }
+    it('should return 405 method on static then GET and HEAD', async () => {
+      const res = await fetch(
+        `http://localhost:${appPort}/static/data/item.txt`,
+        {
+          method: 'POST'
+        }
+      )
+      expect(res.headers.get('allow').includes('GET')).toBe(true)
+      expect(res.status).toBe(405)
     })
 
     it('should set Content-Length header', async () => {
@@ -95,7 +135,10 @@ describe('Production Usage', () => {
     it('should set Cache-Control header', async () => {
       const buildId = readFileSync(join(__dirname, '../.next/BUILD_ID'), 'utf8')
       const buildManifest = require(join('../.next', BUILD_MANIFEST))
-      const reactLoadableManifest = require(join('../.next', REACT_LOADABLE_MANIFEST))
+      const reactLoadableManifest = require(join(
+        '../.next',
+        REACT_LOADABLE_MANIFEST
+      ))
       const url = `http://localhost:${appPort}/_next/`
 
       const resources = []
@@ -104,18 +147,24 @@ describe('Production Usage', () => {
       resources.push(`${url}static/${buildId}/pages/index.js`)
 
       // test dynamic chunk
-      resources.push(url + reactLoadableManifest['../../components/hello1'][0].publicPath)
+      resources.push(
+        url + reactLoadableManifest['../../components/hello1'][0].publicPath
+      )
 
       // test main.js runtime etc
       for (const item of buildManifest.pages['/']) {
         resources.push(url + item)
       }
 
-      const responses = await Promise.all(resources.map((resource) => fetch(resource)))
+      const responses = await Promise.all(
+        resources.map(resource => fetch(resource))
+      )
 
-      responses.forEach((res) => {
+      responses.forEach(res => {
         try {
-          expect(res.headers.get('Cache-Control')).toBe('public, max-age=31536000, immutable')
+          expect(res.headers.get('Cache-Control')).toBe(
+            'public, max-age=31536000, immutable'
+          )
         } catch (err) {
           err.message = res.url + ' ' + err.message
           throw err
@@ -125,14 +174,18 @@ describe('Production Usage', () => {
 
     it('should set correct Cache-Control header for static 404s', async () => {
       // this is to fix where 404 headers are set to 'public, max-age=31536000, immutable'
-      const res = await fetch(`http://localhost:${appPort}/_next//static/common/bad-static.js`)
+      const res = await fetch(
+        `http://localhost:${appPort}/_next//static/common/bad-static.js`
+      )
 
       expect(res.status).toBe(404)
-      expect(res.headers.get('Cache-Control')).toBe('no-cache, no-store, max-age=0, must-revalidate')
+      expect(res.headers.get('Cache-Control')).toBe(
+        'no-cache, no-store, max-age=0, must-revalidate'
+      )
     })
 
     it('should block special pages', async () => {
-      const urls = ['/_document', '/_error']
+      const urls = ['/_document', '/_app']
       for (const url of urls) {
         const html = await renderViaHTTP(appPort, url)
         expect(html).toMatch(/404/)
@@ -140,17 +193,87 @@ describe('Production Usage', () => {
     })
   })
 
+  describe('API routes', () => {
+    it('should work with pages/api/index.js', async () => {
+      const url = `http://localhost:${appPort}/api`
+      const res = await fetch(url)
+      const body = await res.text()
+      expect(body).toEqual('API index works')
+    })
+
+    it('should work with pages/api/hello.js', async () => {
+      const url = `http://localhost:${appPort}/api/hello`
+      const res = await fetch(url)
+      const body = await res.text()
+      expect(body).toEqual('API hello works')
+    })
+  })
+
   describe('With navigation', () => {
     it('should navigate via client side', async () => {
       const browser = await webdriver(appPort, '/')
       const text = await browser
-        .elementByCss('a').click()
+        .elementByCss('a')
+        .click()
         .waitForElementByCss('.about-page')
-        .elementByCss('div').text()
+        .elementByCss('div')
+        .text()
 
       expect(text).toBe('About Page')
-      browser.close()
+      await browser.close()
     })
+
+    it('should navigate to nested index via client side', async () => {
+      const browser = await webdriver(appPort, '/another')
+      const text = await browser
+        .elementByCss('a')
+        .click()
+        .waitForElementByCss('.index-page')
+        .elementByCss('p')
+        .text()
+
+      expect(text).toBe('Hello World')
+      await browser.close()
+    })
+  })
+
+  it('should navigate to external site and back', async () => {
+    const browser = await webdriver(appPort, '/external-and-back')
+    const initialText = await browser.elementByCss('p').text()
+    expect(initialText).toBe('server')
+
+    await browser
+      .elementByCss('a')
+      .click()
+      .waitForElementByCss('input')
+      .back()
+      .waitForElementByCss('p')
+
+    await waitFor(1000)
+    const newText = await browser.elementByCss('p').text()
+    expect(newText).toBe('server')
+  })
+
+  it('should change query correctly', async () => {
+    const browser = await webdriver(appPort, '/query?id=0')
+    let id = await browser.elementByCss('#q0').text()
+    expect(id).toBe('0')
+
+    await browser
+      .elementByCss('#first')
+      .click()
+      .waitForElementByCss('#q1')
+
+    id = await browser.elementByCss('#q1').text()
+    expect(id).toBe('1')
+
+    await browser
+      .elementByCss('#second')
+      .click()
+      .waitForElementByCss('#q2')
+
+    id = await browser.elementByCss('#q2').text()
+    expect(id).toBe('2')
   })
 
   describe('Runtime errors', () => {
@@ -163,7 +286,7 @@ describe('Production Usage', () => {
       const headingText = await browser.elementByCss('h1').text()
       // This makes sure we render statusCode on the client side correctly
       expect(headingText).toBe('500')
-      browser.close()
+      await browser.close()
     })
 
     it('should render a client side component error', async () => {
@@ -171,15 +294,18 @@ describe('Production Usage', () => {
       await waitFor(2000)
       const text = await browser.elementByCss('body').text()
       expect(text).toMatch(/An unexpected error has occurred\./)
-      browser.close()
+      await browser.close()
     })
 
     it('should call getInitialProps on _error page during a client side component error', async () => {
-      const browser = await webdriver(appPort, '/error-in-browser-render-status-code')
+      const browser = await webdriver(
+        appPort,
+        '/error-in-browser-render-status-code'
+      )
       await waitFor(2000)
       const text = await browser.elementByCss('body').text()
       expect(text).toMatch(/This page could not be found\./)
-      browser.close()
+      await browser.close()
     })
   })
 
@@ -191,7 +317,12 @@ describe('Production Usage', () => {
           this.finished = true
         }
       }
-      const html = await app.renderToHTML({}, res, '/finish-response', {})
+      const html = await app.renderToHTML(
+        { method: 'GET' },
+        res,
+        '/finish-response',
+        {}
+      )
       expect(html).toBeFalsy()
     })
 
@@ -204,11 +335,27 @@ describe('Production Usage', () => {
       expect(data).toBe('item')
     })
 
+    it('Should allow access to public files', async () => {
+      const data = await renderViaHTTP(appPort, '/data/data.txt')
+      expect(data).toBe('data')
+    })
+
+    it('Should prioritize pages over public files', async () => {
+      const html = await renderViaHTTP(appPort, '/about')
+      const data = await renderViaHTTP(appPort, '/file')
+
+      expect(html).toMatch(/About Page/)
+      expect(data).toBe('test')
+    })
+
     it('should reload the page on page script error', async () => {
       const browser = await webdriver(appPort, '/counter')
       const counter = await browser
-        .elementByCss('#increase').click().click()
-        .elementByCss('#counter').text()
+        .elementByCss('#increase')
+        .click()
+        .click()
+        .elementByCss('#counter')
+        .text()
       expect(counter).toBe('Counter: 2')
 
       // When we go to the 404 page, it'll do a hard reload.
@@ -216,135 +363,112 @@ describe('Production Usage', () => {
       // Since the page is reloaded, when we go back to the counter page again,
       // previous counter value should be gone.
       const counterAfter404Page = await browser
-        .elementByCss('#no-such-page').click()
+        .elementByCss('#no-such-page')
+        .click()
         .waitForElementByCss('h1')
         .back()
         .waitForElementByCss('#counter-page')
-        .elementByCss('#counter').text()
+        .elementByCss('#counter')
+        .text()
       expect(counterAfter404Page).toBe('Counter: 0')
 
-      browser.close()
+      await browser.close()
     })
 
-    it('should add preload tags when Link prefetch prop is used', async () => {
-      const browser = await webdriver(appPort, '/prefetch')
-      const elements = await browser.elementsByCss('link[rel=preload]')
-      expect(elements.length).toBe(9)
-      await Promise.all(
-        elements.map(async (element) => {
-          const rel = await element.getAttribute('rel')
-          const as = await element.getAttribute('as')
-          expect(rel).toBe('preload')
-          expect(as).toBe('script')
-        })
-      )
-      browser.close()
-    })
-
-    // This is a workaround to fix https://github.com/zeit/next.js/issues/5860
-    // TODO: remove this workaround when https://bugs.webkit.org/show_bug.cgi?id=187726 is fixed.
-    it('It does not add a timestamp to link tags with preload attribute', async () => {
-      const browser = await webdriver(appPort, '/prefetch')
-      const links = await browser.elementsByCss('link[rel=preload]')
-      await Promise.all(
-        links.map(async (element) => {
-          const href = await element.getAttribute('href')
-          expect(href).not.toMatch(/\?ts=/)
-        })
-      )
-      const scripts = await browser.elementsByCss('script[src]')
-      await Promise.all(
-        scripts.map(async (element) => {
-          const src = await element.getAttribute('src')
-          expect(src).not.toMatch(/\?ts=/)
-        })
-      )
-      browser.close()
-    })
-
-    it('should reload the page on page script error with prefetch', async () => {
-      const browser = await webdriver(appPort, '/counter')
-      const counter = await browser
-        .elementByCss('#increase').click().click()
-        .elementByCss('#counter').text()
-      expect(counter).toBe('Counter: 2')
-
-      // Let the browser to prefetch the page and error it on the console.
-      await waitFor(3000)
-      const browserLogs = await browser.log('browser')
-      let foundLog = false
-      browserLogs.forEach((log) => {
-        if (log.message.match(/\/no-such-page\.js - Failed to load resource/)) {
-          foundLog = true
-        }
+    if (browserName === 'chrome') {
+      it('should add preload tags when Link prefetch prop is used', async () => {
+        const browser = await webdriver(appPort, '/prefetch')
+        const elements = await browser.elementsByCss('link[rel=preload]')
+        expect(elements.length).toBe(9)
+        await Promise.all(
+          elements.map(async element => {
+            const rel = await element.getAttribute('rel')
+            const as = await element.getAttribute('as')
+            expect(rel).toBe('preload')
+            expect(as).toBe('script')
+          })
+        )
+        await browser.close()
       })
 
-      expect(foundLog).toBe(true)
+      // This is a workaround to fix https://github.com/zeit/next.js/issues/5860
+      // TODO: remove this workaround when https://bugs.webkit.org/show_bug.cgi?id=187726 is fixed.
+      it('It does not add a timestamp to link tags with preload attribute', async () => {
+        const browser = await webdriver(appPort, '/prefetch')
+        const links = await browser.elementsByCss('link[rel=preload]')
+        await Promise.all(
+          links.map(async element => {
+            const href = await element.getAttribute('href')
+            expect(href).not.toMatch(/\?ts=/)
+          })
+        )
+        const scripts = await browser.elementsByCss('script[src]')
+        await Promise.all(
+          scripts.map(async element => {
+            const src = await element.getAttribute('src')
+            expect(src).not.toMatch(/\?ts=/)
+          })
+        )
+        await browser.close()
+      })
 
-      // When we go to the 404 page, it'll do a hard reload.
-      // So, it's possible for the front proxy to load a page from another zone.
-      // Since the page is reloaded, when we go back to the counter page again,
-      // previous counter value should be gone.
-      const counterAfter404Page = await browser
-        .elementByCss('#no-such-page-prefetch').click()
-        .waitForElementByCss('h1')
-        .back()
-        .waitForElementByCss('#counter-page')
-        .elementByCss('#counter').text()
-      expect(counterAfter404Page).toBe('Counter: 0')
+      it('should reload the page on page script error with prefetch', async () => {
+        const browser = await webdriver(appPort, '/counter')
+        if (!browser.log) return
+        const counter = await browser
+          .elementByCss('#increase')
+          .click()
+          .click()
+          .elementByCss('#counter')
+          .text()
+        expect(counter).toBe('Counter: 2')
 
-      browser.close()
-    })
-  })
-
-  describe('X-Powered-By header', () => {
-    it('should set it by default', async () => {
-      const req = { url: '/stateless', headers: {} }
-      const headers = {}
-      const res = {
-        getHeader (key) {
-          return headers[key]
-        },
-        setHeader (key, value) {
-          headers[key] = value
-        },
-        end () {}
-      }
-
-      await app.render(req, res, req.url)
-      expect(headers['X-Powered-By']).toEqual(`Next.js ${pkg.version}`)
-    })
-
-    it('should not set it when poweredByHeader==false', async () => {
-      const req = { url: '/stateless', headers: {} }
-      const originalConfigValue = app.nextConfig.poweredByHeader
-      app.nextConfig.poweredByHeader = false
-      const res = {
-        getHeader () {
-          return false
-        },
-        setHeader (key, value) {
-          if (key === 'XPoweredBy') {
-            throw new Error('Should not set the XPoweredBy header')
+        // Let the browser to prefetch the page and error it on the console.
+        await waitFor(3000)
+        const browserLogs = await browser.log('browser')
+        let foundLog = false
+        browserLogs.forEach(log => {
+          if (
+            log.message.match(/\/no-such-page\.js - Failed to load resource/)
+          ) {
+            foundLog = true
           }
-        },
-        end () {}
-      }
+        })
 
-      await app.render(req, res, req.url)
-      app.nextConfig.poweredByHeader = originalConfigValue
-    })
+        expect(foundLog).toBe(true)
+
+        // When we go to the 404 page, it'll do a hard reload.
+        // So, it's possible for the front proxy to load a page from another zone.
+        // Since the page is reloaded, when we go back to the counter page again,
+        // previous counter value should be gone.
+        const counterAfter404Page = await browser
+          .elementByCss('#no-such-page-prefetch')
+          .click()
+          .waitForElementByCss('h1')
+          .back()
+          .waitForElementByCss('#counter-page')
+          .elementByCss('#counter')
+          .text()
+        expect(counterAfter404Page).toBe('Counter: 0')
+
+        await browser.close()
+      })
+    }
   })
 
   it('should not expose the compiled page file in development', async () => {
     const url = `http://localhost:${appPort}`
     await fetch(`${url}/stateless`) // make sure the stateless page is built
-    const clientSideJsRes = await fetch(`${url}/_next/development/static/development/pages/stateless.js`)
+    const clientSideJsRes = await fetch(
+      `${url}/_next/development/static/development/pages/stateless.js`
+    )
     expect(clientSideJsRes.status).toBe(404)
     const clientSideJsBody = await clientSideJsRes.text()
     expect(clientSideJsBody).toMatch(/404/)
 
-    const serverSideJsRes = await fetch(`${url}/_next/development/server/static/development/pages/stateless.js`)
+    const serverSideJsRes = await fetch(
+      `${url}/_next/development/server/static/development/pages/stateless.js`
+    )
     expect(serverSideJsRes.status).toBe(404)
     const serverSideJsBody = await serverSideJsRes.text()
     expect(serverSideJsBody).toMatch(/404/)
@@ -367,8 +491,44 @@ describe('Production Usage', () => {
     expect(html).toMatch(/Bad Request/)
   })
 
+  it('should replace static pages with HTML files', async () => {
+    const staticFiles = ['about', 'another', 'counter', 'dynamic', 'prefetch']
+    for (const file of staticFiles) {
+      expect(existsSync(join(serverDir, file + '.html'))).toBe(true)
+      expect(existsSync(join(serverDir, file + '.js'))).toBe(false)
+    }
+  })
+
+  it('should not replace non-static pages with HTML files', async () => {
+    const nonStaticFiles = ['api', 'external-and-back', 'finish-response']
+    for (const file of nonStaticFiles) {
+      expect(existsSync(join(serverDir, file + '.js'))).toBe(true)
+      expect(existsSync(join(serverDir, file + '.html'))).toBe(false)
+    }
+  })
+
+  it('should prerender pages with data correctly', async () => {
+    const toSomething = await renderViaHTTP(appPort, '/to-something')
+    expect(toSomething).toMatch(/some interesting title/)
+
+    const something = await renderViaHTTP(appPort, '/something')
+    expect(something).toMatch(/this is some data to be inlined/)
+  })
+
+  it('should have inlined the data correctly in prerender', async () => {
+    const browser = await webdriver(appPort, '/to-something')
+    await browser.elementByCss('#something').click()
+
+    let text = await browser.elementByCss('h3').text()
+    expect(text).toMatch(/this is some data to be inlined/)
+
+    await browser.elementByCss('#to-something').click()
+    text = await browser.elementByCss('h3').text()
+    expect(text).toMatch(/some interesting title/)
+  })
+
   dynamicImportTests(context, (p, q) => renderViaHTTP(context.appPort, p, q))
 
   processEnv(context)
-  security(context)
+  if (browserName === 'chrome') security(context)
 })

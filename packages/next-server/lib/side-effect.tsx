@@ -5,22 +5,29 @@ const isServer = typeof window === 'undefined'
 type State = Array<React.ReactElement<any>> | undefined
 
 type SideEffectProps = {
-  reduceComponentsToState: (components: Array<React.ReactElement<any>>) => State,
-  handleStateChange?: (state: State) => void,
+  reduceComponentsToState: <T>(
+    components: Array<React.ReactElement<any>>,
+    props: T
+  ) => State
+  handleStateChange?: (state: State) => void
+  inAmpMode?: boolean
 }
 
-export default function withSideEffect() {
+export default () => {
   const mountedInstances: Set<any> = new Set()
   let state: State
 
   function emitChange(component: React.Component<SideEffectProps>) {
-    state = component.props.reduceComponentsToState([...mountedInstances])
+    state = component.props.reduceComponentsToState(
+      [...mountedInstances],
+      component.props
+    )
     if (component.props.handleStateChange) {
       component.props.handleStateChange(state)
     }
   }
 
-  class SideEffect extends Component<SideEffectProps> {
+  return class extends Component<SideEffectProps> {
     // Used when server rendering
     static rewind() {
       const recordedState = state
@@ -52,6 +59,4 @@ export default function withSideEffect() {
       return null
     }
   }
-
-  return SideEffect
 }

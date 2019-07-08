@@ -1,59 +1,119 @@
-import {loader} from 'webpack'
-import {join} from 'path'
-import {parse} from 'querystring'
+import { loader } from 'webpack'
+import { join } from 'path'
+import { parse } from 'querystring'
 import { BUILD_MANIFEST, REACT_LOADABLE_MANIFEST } from 'next-server/constants'
+import { isDynamicRoute } from 'next-server/dist/lib/router/utils'
 
 export type ServerlessLoaderQuery = {
-  page: string,
-  distDir: string,
-  absolutePagePath: string,
-  absoluteAppPath: string,
-  absoluteDocumentPath: string,
-  absoluteErrorPath: string,
-  buildId: string,
-  assetPrefix: string,
+  page: string
+  distDir: string
+  absolutePagePath: string
+  absoluteAppPath: string
+  absoluteDocumentPath: string
+  absoluteErrorPath: string
+  assetPrefix: string
+  ampBindInitData: boolean | string
   generateEtags: string
+  dynamicBuildId?: string | boolean
+  canonicalBase: string
 }
 
-const nextServerlessLoader: loader.Loader = function () {
+const nextServerlessLoader: loader.Loader = function() {
   const {
     distDir,
     absolutePagePath,
     page,
-    buildId,
+    canonicalBase,
     assetPrefix,
+    ampBindInitData,
     absoluteAppPath,
     absoluteDocumentPath,
     absoluteErrorPath,
-    generateEtags
-  }: ServerlessLoaderQuery = typeof this.query === 'string' ? parse(this.query.substr(1)) : this.query
+    generateEtags,
+    dynamicBuildId,
+  }: ServerlessLoaderQuery =
+    typeof this.query === 'string' ? parse(this.query.substr(1)) : this.query
   const buildManifest = join(distDir, BUILD_MANIFEST).replace(/\\/g, '/')
-  const reactLoadableManifest = join(distDir, REACT_LOADABLE_MANIFEST).replace(/\\/g, '/')
-  return `
+  const reactLoadableManifest = join(distDir, REACT_LOADABLE_MANIFEST).replace(
+    /\\/g,
+    '/'
+  )
+
+  if (page.startsWith('/api')) {
+    return `
+    ${
+      isDynamicRoute(page)
+        ? `
+      import { getRouteMatcher } from 'next-server/dist/lib/router/utils/route-matcher';
+      import { getRouteRegex } from 'next-server/dist/lib/router/utils/route-regex';
+      `
+        : ``
+    }
+      import { apiResolver } from 'next-server/dist/server/api-utils'
+    
+      export default (req, res) => {
+        const params = ${
+          isDynamicRoute(page)
+            ? `getRouteMatcher(getRouteRegex('${page}'))(req.url)`
+            : `{}`
+        }
+        const resolver = require('${absolutePagePath}')
+        apiResolver(req, res, params, resolver)
+      }
+    `
+  } else {
+    return `
     import {parse} from 'url'
     import {renderToHTML} from 'next-server/dist/server/render';
     import {sendHTML} from 'next-server/dist/server/send-html';
+    ${
+      isDynamicRoute(page)
+        ? `import {getRouteMatcher, getRouteRegex} from 'next-server/dist/lib/router/utils';`
+        : ''
+    }
     import buildManifest from '${buildManifest}';
     import reactLoadableManifest from '${reactLoadableManifest}';
     import Document from '${absoluteDocumentPath}';
     import Error from '${absoluteErrorPath}';
     import App from '${absoluteAppPath}';
-    import Component from '${absolutePagePath}';
-    async function renderReqToHTML(req, res) {
+    import * as ComponentInfo from '${absolutePagePath}';
+    const Component = ComponentInfo.default
+    export default Component
+    export const config = ComponentInfo['confi' + 'g'] || {}
+    export const _app = App
+    export async function renderReqToHTML(req, res, fromExport) {
       const options = {
         App,
         Document,
         buildManifest,
         reactLoadableManifest,
-        buildId: "${buildId}",
-        assetPrefix: "${assetPrefix}"
+        canonicalBase: "${canonicalBase}",
+        buildId: "__NEXT_REPLACE__BUILD_ID__",
+        dynamicBuildId: ${dynamicBuildId === true || dynamicBuildId === 'true'},
+        assetPrefix: "${assetPrefix}",
+        ampBindInitData: ${ampBindInitData === true ||
+          ampBindInitData === 'true'}
       }
       const parsedUrl = parse(req.url, true)
+      const renderOpts = Object.assign(
+        {
+          Component,
+          pageConfig: config,
+          dataOnly: req.headers && (req.headers.accept || '').indexOf('application/amp.bind+json') !== -1,
+          nextExport: fromExport
+        },
+        options,
+      )
       try {
         ${page === '/_error' ? `res.statusCode = 404` : ''}
-        const result = await renderToHTML(req, res, "${page}", parsedUrl.query, Object.assign({}, options, {
-          Component
-        }))
+        ${
+          isDynamicRoute(page)
+            ? `const params = getRouteMatcher(getRouteRegex("${page}"))(parsedUrl.pathname) || {};`
+            : `const params = {};`
+        }
+        const result = await renderToHTML(req, res, "${page}", Object.assign({}, parsedUrl.query, params), renderOpts)
+
+        if (fromExport) return { html: result, renderOpts }
         return result
       } catch (err) {
         if (err.code === 'ENOENT') {
@@ -84,6 +144,7 @@ const nextServerlessLoader: loader.Loader = function () {
       }
     }
   `
+  }
 }
 
 export default nextServerlessLoader
