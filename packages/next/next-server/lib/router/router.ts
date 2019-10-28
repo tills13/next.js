@@ -24,16 +24,16 @@ function toRoute(path: string): string {
 
 type Url = UrlObject | string
 
-export type BaseRouter = {
+export type BaseRouter<Q = {}> = {
   route: string
   pathname: string
-  query: ParsedUrlQuery
+  query: Q & ParsedUrlQuery
   asPath: string
 }
 
-export type NextRouter = BaseRouter &
+export type NextRouter<Q = {}> = BaseRouter<Q> &
   Pick<
-    Router,
+    Router<Q>,
     | 'push'
     | 'replace'
     | 'reload'
@@ -56,10 +56,10 @@ type BeforePopStateCallback = (state: any) => boolean
 
 type ComponentLoadCancel = (() => void) | null
 
-export default class Router implements BaseRouter {
+export default class Router<Q = {}> implements BaseRouter<Q> {
   route: string
   pathname: string
-  query: ParsedUrlQuery
+  query: Q & ParsedUrlQuery
   asPath: string
   /**
    * Map of all components loaded in `Router`
@@ -76,7 +76,7 @@ export default class Router implements BaseRouter {
 
   constructor(
     pathname: string,
-    query: ParsedUrlQuery,
+    query: Q & ParsedUrlQuery,
     as: string,
     {
       initialProps,
@@ -651,7 +651,7 @@ export default class Router implements BaseRouter {
     } else {
       const AppTree = this._wrapApp(App)
       ctx.AppTree = AppTree
-      props = await loadGetInitialProps<AppContextType<Router>>(App, {
+      props = await loadGetInitialProps<AppContextType<Router<Q>>>(App, {
         AppTree,
         Component,
         router: this,

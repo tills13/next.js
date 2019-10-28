@@ -2,8 +2,8 @@ import React from 'react'
 import { NextComponentType, NextPageContext } from '../next-server/lib/utils'
 import { NextRouter, RouterContext } from './router'
 
-export type WithRouterProps = {
-  router: NextRouter
+export type WithRouterProps<Q = any> = {
+  router: NextRouter<Q>
 }
 
 export type ExcludeRouterProps<P> = Pick<
